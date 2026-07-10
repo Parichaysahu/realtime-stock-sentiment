@@ -1,0 +1,11 @@
+yfinance
+vaderSentiment
+requests
+pandas
+schedule
+sqlalchemy
+psycopg2-binary
+scikit-learn
+joblib
+streamlit
+plotly
