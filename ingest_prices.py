@@ -1,7 +1,13 @@
+import os
 import yfinance as yf
 from sqlalchemy import create_engine, text
 from datetime import datetime
-from config import TICKERS, DATABASE_URL
+
+try:
+    from config import TICKERS, DATABASE_URL
+except ImportError:
+    TICKERS = os.environ["TICKERS"].split(",")
+    DATABASE_URL = os.environ["DATABASE_URL"]
 
 def fetch_and_store_prices():
     engine = create_engine(DATABASE_URL)

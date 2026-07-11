@@ -1,8 +1,15 @@
+import os
 import requests
 from sqlalchemy import create_engine, text
 from datetime import datetime
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from config import NEWSAPI_KEY, TICKERS, DATABASE_URL
+
+try:
+    from config import NEWSAPI_KEY, TICKERS, DATABASE_URL
+except ImportError:
+    NEWSAPI_KEY = os.environ["NEWSAPI_KEY"]
+    TICKERS = os.environ["TICKERS"].split(",")
+    DATABASE_URL = os.environ["DATABASE_URL"]
 
 analyzer = SentimentIntensityAnalyzer()
 
