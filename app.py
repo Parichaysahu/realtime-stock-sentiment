@@ -1,14 +1,19 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+from sqlalchemy import create_engine
 import joblib
 import plotly.graph_objects as go
 from datetime import datetime
+import os
 
 st.set_page_config(page_title="Real-time stock sentiment predictor", layout="wide")
 
-DB_PATH = "data/market_sentiment.db"
-MODEL_PATH = "data/stock_sentiment_model.pkl"
+try:
+    from config import DATABASE_URL
+except ImportError:
+    DATABASE_URL = os.environ["DATABASE_URL"]
+
+MODEL_PATH = "stock_sentiment_model.pkl"
 
 @st.cache_resource
 def load_model():
@@ -16,14 +21,36 @@ def load_model():
 
 @st.cache_data(ttl=300)
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
-    model_df = pd.read_sql("SELECT * FROM model_features", conn)
-    prices = pd.read_sql("SELECT * FROM stock_prices", conn)
-    news = pd.read_sql("SELECT * FROM news_sentiment", conn)
-    conn.close()
-    model_df['date'] = pd.to_datetime(model_df['date'])
+    engine = create_engine(DATABASE_URL)
+    prices = pd.read_sql("SELECT * FROM stock_prices", engine)
+    news = pd.read_sql("SELECT * FROM news_sentiment", engine)
+
     prices['timestamp'] = pd.to_datetime(prices['timestamp'])
-    news['published_at'] = pd.to_datetime(news['published_at'])
+    news['published_at'] = pd.to_datetime(news['published_at'], utc=True).dt.tz_localize(None)
+    prices['date'] = prices['timestamp'].dt.date
+    news['date'] = news['published_at'].dt.date
+
+    prices = prices.sort_values(['ticker', 'date'])
+    daily_prices = prices.groupby(['ticker', 'date']).agg(
+        day_open=('open', 'first'), day_close=('close', 'last'),
+        day_high=('high', 'max'), day_low=('low', 'min'), day_volume=('volume', 'sum')
+    ).reset_index()
+    daily_prices['daily_return'] = (daily_prices['day_close'] - daily_prices['day_open']) / daily_prices['day_open']
+    daily_prices['ma_7'] = daily_prices.groupby('ticker')['day_close'].transform(lambda x: x.rolling(7).mean())
+    daily_prices['ma_14'] = daily_prices.groupby('ticker')['day_close'].transform(lambda x: x.rolling(14).mean())
+    daily_prices['volatility_7'] = daily_prices.groupby('ticker')['daily_return'].transform(lambda x: x.rolling(7).std())
+
+    daily_sentiment = news.groupby(['ticker', 'date']).agg(
+        avg_sentiment=('sentiment_score', 'mean'),
+        num_articles=('sentiment_score', 'count'),
+        positive_ratio=('sentiment_label', lambda x: (x == 'positive').mean())
+    ).reset_index()
+
+    model_df = pd.merge(daily_prices, daily_sentiment, on=['ticker', 'date'], how='left')
+    model_df['avg_sentiment'] = model_df['avg_sentiment'].fillna(0)
+    model_df['num_articles'] = model_df['num_articles'].fillna(0)
+    model_df['positive_ratio'] = model_df['positive_ratio'].fillna(0)
+
     return model_df, prices, news
 
 model = load_model()
@@ -40,7 +67,7 @@ if st.sidebar.button("Refresh data"):
     st.rerun()
 
 st.sidebar.caption(f"Data last loaded: {datetime.now().strftime('%H:%M:%S')}")
-st.sidebar.info("Run `python run_scheduler.py` in a separate terminal to keep data updating automatically.")
+st.sidebar.info("Data updates automatically every 30 minutes via GitHub Actions.")
 
 ticker_df = model_df[model_df['ticker'] == selected_ticker].sort_values('date')
 ticker_news = news[news['ticker'] == selected_ticker].sort_values('published_at', ascending=False)

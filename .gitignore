@@ -1,6 +1,5 @@
 config.py
 data/
-*.pkl
 __pycache__/
 .ipynb_checkpoints/
 *.db
